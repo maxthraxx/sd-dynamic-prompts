@@ -1,0 +1,19 @@
+mithral
+adamantite
+bronze
+copper
+gold
+silver
+leather
+hide
+chain shirt
+scale mail
+breastplate
+padded
+studded leather
+half plate
+ring mail
+chain mail
+splint
+plate
+cloth
