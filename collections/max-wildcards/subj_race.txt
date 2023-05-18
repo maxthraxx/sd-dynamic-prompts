@@ -1,6 +1,0 @@
-black
-white
-asian
-indian
-native american
-latina

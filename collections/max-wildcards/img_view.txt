@@ -1,7 +1,0 @@
-Front
-Side
-Back
-High angle
-Low angle
-Overhead
-Angled
