@@ -16,10 +16,12 @@ from modules import devices
 from modules.processing import fix_seed
 from modules.shared import opts
 
+from install import check_correct_dynamicprompts_installed, get_update_command
 from sd_dynamic_prompts import __version__, callbacks
 from sd_dynamic_prompts.element_ids import make_element_id
 from sd_dynamic_prompts.generator_builder import GeneratorBuilder
 from sd_dynamic_prompts.helpers import (
+    generate_prompts,
     get_magicmodels_path,
     get_seeds,
     load_magicprompt_models,
@@ -38,6 +40,7 @@ is_debug = getattr(opts, "is_debug", False)
 if is_debug:
     logger.setLevel(logging.DEBUG)
 
+check_correct_dynamicprompts_installed()
 base_dir = Path(scripts.basedir())
 magicprompt_models_path = get_magicmodels_path(base_dir)
 
@@ -69,32 +72,6 @@ device = devices.device
 # There might be a bug in auto1111 where the correct device is not inferred in some scenarios
 if device.type == "cuda" and not device.index:
     device = torch.device("cuda:0")
-
-
-def generate_prompts(
-    prompt_generator,
-    negative_prompt_generator,
-    prompt,
-    negative_prompt,
-    num_prompts,
-):
-    all_prompts = prompt_generator.generate(prompt, num_prompts) or [""]
-    total_prompts = len(all_prompts)
-
-    all_negative_prompts = negative_prompt_generator.generate(
-        negative_prompt,
-        num_prompts,
-    ) or [""]
-
-    if len(all_negative_prompts) < total_prompts:
-        all_negative_prompts = all_negative_prompts * (
-            total_prompts // len(all_negative_prompts) + 1
-        )
-
-    all_negative_prompts = all_negative_prompts[:total_prompts]
-
-    return all_prompts, all_negative_prompts
-
 
 loaded_count = 0
 
@@ -131,6 +108,9 @@ class Script(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
+        correct_lib_version = check_correct_dynamicprompts_installed()
+        update_command = get_update_command()
+
         html_path = base_dir / "helptext.html"
         html = html_path.open().read()
         html = Template(html).substitute(
@@ -146,11 +126,17 @@ class Script(scripts.Script):
             with gr.Accordion("Dynamic Prompts", open=False):
                 is_enabled = gr.Checkbox(
                     label="Dynamic Prompts enabled",
-                    value=True,
+                    value=correct_lib_version,
+                    interactive=correct_lib_version,
                     elem_id=make_element_id("dynamic-prompts-enabled"),
                 )
 
-                with gr.Group():
+                if not correct_lib_version:
+                    gr.HTML(
+                        f"""<span class="warning sddp-warning">Dynamic Prompts is not installed correctly</span>. Please reinstall the dynamic prompts library by running the following command: <span class="sddp-info">{update_command}</span>""",
+                    )
+
+                with gr.Group(visible=correct_lib_version):
                     is_combinatorial = gr.Checkbox(
                         label="Combinatorial generation",
                         value=False,
@@ -449,12 +435,24 @@ class Script(scripts.Script):
             else:
                 negative_generator = generator
 
+            all_seeds = None
+            if num_images:
+                p.all_seeds, p.all_subseeds = get_seeds(
+                    p,
+                    num_images,
+                    use_fixed_seed,
+                    is_combinatorial,
+                    combinatorial_batches,
+                )
+                all_seeds = p.all_seeds
+
             all_prompts, all_negative_prompts = generate_prompts(
                 generator,
                 negative_generator,
                 original_prompt,
                 original_negative_prompt,
                 num_images,
+                all_seeds,
             )
 
         except GeneratorException as e:
@@ -465,13 +463,14 @@ class Script(scripts.Script):
         updated_count = len(all_prompts)
         p.n_iter = math.ceil(updated_count / p.batch_size)
 
-        p.all_seeds, p.all_subseeds = get_seeds(
-            p,
-            updated_count,
-            use_fixed_seed,
-            is_combinatorial,
-            combinatorial_batches,
-        )
+        if num_images != updated_count:
+            p.all_seeds, p.all_subseeds = get_seeds(
+                p,
+                updated_count,
+                use_fixed_seed,
+                is_combinatorial,
+                combinatorial_batches,
+            )
 
         logger.info(
             f"Prompt matrix will create {updated_count} images in a total of {p.n_iter} batches.",
